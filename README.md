@@ -1,19 +1,34 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+# 🧉 MatePay
+
+Pagá y cobrá en dólares digitales (USDC) sobre Solana, con QR y alias.
+
+![MatePay](src/assets/images/project_matepay_preview_1791050873178.jpg)
+
 </div>
 
-# Run and deploy your AI Studio app
+Prototipo hecho en la **Hackathon Solana x Superteam Argentina**.
 
-This contains everything you need to run your app locally.
-https://ai.studio/apps/6ecc7621-48f1-4299-9221-73c4d4c744b0
+## Qué hace
+- **Comercio (POS):** ingresa el monto en pesos, la app lo convierte a USDC y genera un QR de Solana Pay.
+- **Cliente:** escanea el QR o escribe un alias (ej. `@cafemartinez`) y confirma el pago.
+- **Sin SOL:** un fee-payer cubre las comisiones de red.
 
-## Run Locally
+## Estado
+Prototipo en **Devnet**. El flujo de pago es una simulación para mostrar la experiencia de usuario.
 
-**Prerequisites:**  Node.js
+## Stack
+React, TypeScript, Vite, Tailwind, Express, `@solana/web3.js`, `@solana/spl-token`.
 
+## Cómo correrlo
+**Requisito:** Node.js
 
-1. Install dependencies:
+1. Instalá las dependencias:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Copiá `.env.example` a `.env` y completá las variables, como `GEMINI_API_KEY`.
+3. Corré la app:
    `npm run dev`
+
+## Equipo
+Juan Pablo Gerez, Mauricio Montero, Máximo Robles
