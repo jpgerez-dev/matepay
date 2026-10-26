@@ -9,7 +9,7 @@
 ## 👥 Roles del Equipo
 
 * **Montero Mauricio:** Ing. en Sistemas — *Full Stack & Web3 Lead*
-* **Gerez Juan Pablo:** *Frontend Lead*
+* **Gerez Juan Pablo:** Estudiante de ing. en Sistemas & Desarrollador Front
 * **Robles Máximo:** *Diseñador Multimedial & Aprendiz de Full Stack*
 
 ---
