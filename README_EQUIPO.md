@@ -2,7 +2,7 @@
 ### Hackathon: Colosseum Crypto World's Fair x Superteam Argentina
 **Fecha Límite de Entrega:** 12 de Octubre de 2026
 
-¡Hola equipo! Este repositorio contiene la base funcional de **MatePay** ya testeada y corriendo en **Solana Devnet**, junto con el kit oficial de Superteam Argentina (`workspace-colosseum`).
+¡Hola equipo! Este repositorio contiene **MatePay** funcionando con transacciones reales en **Solana Devnet**, junto con el kit oficial de Superteam Argentina (`workspace-colosseum`).
 
 ---
 
@@ -23,51 +23,74 @@
 ## 🛠️ Cómo Levantar el Proyecto en tu Máquina
 
 ### Requisitos:
-* **Node.js 18+** instalado.
+* **Node.js 20+** instalado.
 * Git.
 
 ### Pasos:
-1. Descomprimir este archivo o clonar el repositorio.
-2. Abrir una terminal en la carpeta del proyecto y ejecutar:
+1. Clonar el repositorio y, en la carpeta del proyecto:
    ```bash
-   npm install --legacy-peer-deps
+   npm install
+   cp .env.example .env   # opcional: todo tiene valores por defecto para devnet
    npm run dev
    ```
-3. Abrir en el navegador: **`http://localhost:3000`**
+2. Abrir **`http://localhost:3000`**.
+3. La primera vez el server crea dos wallets de devnet en `.keys/` (ignorada por git) y muestra sus direcciones en la consola:
+   * **fee-payer**: paga las comisiones de todos. **Necesita SOL de devnet**: pegá su dirección en [faucet.solana.com](https://faucet.solana.com). Sin SOL, los pagos fallan.
+   * **demo-merchant**: el comercio `@cafedelaesquina` de la Demo en vivo. Solo recibe.
+4. Para pagar necesitás **Phantom en devnet** (Settings → Developer settings → Testnet mode) y **USDC de prueba** de [faucet.circle.com](https://faucet.circle.com) (red Solana Devnet). **No hace falta SOL en la wallet del cliente.**
+5. Smoke test de la API (con el server corriendo): `npx tsx scripts/smoke-test.ts http://localhost:3000`
+
+### Probar con el celular (QR real)
+Phantom mobile necesita una URL pública HTTPS para pagar sin SOL escaneando el QR del POS (Solana Pay *transaction request*):
+```bash
+npx cloudflared tunnel --url http://localhost:3000   # o ngrok http 3000
+```
+Poné la URL `https://...` que te da en `APP_URL` del `.env` y reiniciá el server. Sin `APP_URL`, el QR es un *transfer request* clásico: MatePay (pestaña Pagar → cámara) paga sin gas, pero otras wallets cobran su comisión.
 
 ---
 
-## 📱 Lo que ya está Construido y Funcionando (Revisar en la App):
+## 📱 Cómo Funciona (todo real, en Solana devnet)
 
-1. **`⚡ Demo en Vivo` (`src/components/LiveDemo.tsx`):**
-   * Vista dual en paralelo: pantalla del comercio a la izquierda y celular del cliente a la derecha.
-   * Al tocar "Confirmar Pago", se debita el saldo y ambas pantallas se actualizan en **0.4 segundos** con sonido háptico.
-2. **`Cobro POS` (`src/components/PosTerminal.tsx`):**
-   * Teclado numérico táctil para el comerciante.
-   * Conversión en tiempo real de pesos argentinos (ARS) a USDC usando **DolarAPI en vivo** (`https://dolarapi.com/v1/dolares/cripto`).
-   * Generador de QR oficial de **Solana Pay** con el mint de **USDC en Devnet** (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`).
-3. **`Pagar (Cliente)` (`src/components/ClientPay.tsx`):**
-   * Búsqueda por alias (`@cafemartinez`, `@montero`, `@juanpi`, `@roblesmaximo`).
-   * Transacción sin gas (*Gasless*): el usuario paga con 0.00 SOL en su billetera porque la comisión está subsidiada.
-4. **Backend Express (`server.ts`):**
-   * Endpoint de resolución de alias: `GET /api/matepay/aliases` y `GET /api/matepay/alias/:alias`.
-   * Endpoint de Fee-Payer: `POST /api/matepay/fee-payer/sign`.
+1. **Cobrar (`src/components/PosTerminal.tsx`)**: el comercio ingresa pesos, se convierten a USDC con DolarAPI y el server crea un cobro con una `reference` única. El POS consulta la cadena cada 2 s y confirma solo cuando ve la transferencia con el monto, el token y el destino correctos.
+2. **Pagar (`src/components/ClientPay.tsx`)**: el cliente escribe `@alias`, una dirección o escanea el QR con la cámara. El server arma la transacción con **MatePay como fee payer** y la firma, la wallet del cliente firma solo la transferencia de USDC, y el server la envía y confirma.
+3. **Mi cuenta (`src/components/Account.tsx`)**: saldo real, historial de movimientos con link al explorer y registro de `@alias` **firmado con la wallet** (nadie puede registrar un alias a nombre de otra dirección).
+4. **Demo en vivo (`src/components/LiveDemo.tsx`)**: POS y cliente lado a lado, con transacciones reales.
+
+### Backend (`server/matepay/`)
+| Endpoint | Qué hace |
+|---|---|
+| `GET /api/matepay/config` | Red, mint USDC, fee-payer y su saldo |
+| `GET /api/matepay/balance/:address` | Saldo SOL y USDC |
+| `GET /api/matepay/history/:address` | Últimos movimientos en USDC |
+| `GET /api/matepay/alias/:alias` · `GET /api/matepay/alias-of/:address` | Resolver alias |
+| `POST /api/matepay/alias` | Registrar alias (requiere firma de la wallet) |
+| `POST /api/matepay/payment-requests` · `GET /api/matepay/payment-requests/:id` | Crear cobro / consultar si se pagó |
+| `POST /api/matepay/tx/build` | Armar transferencia gasless firmada por el fee-payer |
+| `POST /api/matepay/tx/submit` | Enviar la transacción firmada por el cliente |
+| `GET/POST /api/solana-pay/:id` | Solana Pay transaction request (lo que lee Phantom) |
+
+Protecciones: el server no arranca si el RPC no es devnet (verifica el genesis hash), el fee-payer nunca puede figurar como pagador, hay tope por pago (`MAX_PAYMENT_USDC`) y límite de requests por IP.
+
+Alias y cobros se guardan en `data/*.json` (ignorado por git): alcanza para la hackathon; para producción hace falta una base de datos.
+
+Las herramientas internas (chat con Gemini, analizador, skills) siguen en el código: se ven con `VITE_SHOW_STUDIO=true` en el `.env`.
 
 ---
 
-## 🎯 Próximas Tareas Asignadas por Integrante:
+## 🎯 Próximas Tareas
 
-### 1. Montero Mauricio (Backend & Web3)
-* **Objetivo:** Conectar el Fee-Payer con una Keypair real de Solana Devnet y enviar la transacción directamente al RPC de Solana (Helius/Triton o RPC público).
-* **Archivo principal:** `server.ts`
-* **Librerías listas:** `@solana/web3.js` y `@solana/spl-token` ya están instaladas.
+### Montero Mauricio (Backend & Web3)
+* Revisar `server/matepay/solana.ts` y `routes.ts`. Pasar el RPC a Helius/Triton devnet (`SOLANA_RPC_URL`).
+* Mover alias y cobros de JSON a una base (SQLite/Postgres) antes de hacer deploy.
+* Alertar cuando el fee-payer baje de 0.1 SOL.
 
-### 2. Gerez Juan Pablo (Frontend)
-* **Objetivo:** Conectar Phantom Wallet real vía `@solana/wallet-adapter-react` para que si el usuario tiene la extensión de Phantom en Devnet, pueda firmar con su wallet física además del modo simulación.
-* **Archivo principal:** `src/components/ClientPay.tsx` y `src/App.tsx`.
+### Gerez Juan Pablo (Frontend)
+* Probar el flujo completo con Phantom extensión y Phantom mobile (con túnel HTTPS).
+* Sumar Solana Mobile Wallet Adapter para navegadores de Android sin Phantom.
 
-### 3. Robles Máximo (UX, Conversor y Demo)
-* **Objetivo:** Pulir las microinteracciones visuales, la exportación de comprobantes en PDF/imagen y dirigir la grabación del video de 3 minutos en inglés mostrando la pantalla de `⚡ Demo en Vivo`.
+### Robles Máximo (UX, Conversor y Demo)
+* Pulir microinteracciones de los estados de pago (armando → firmá → enviando → confirmado).
+* Comprobante descargable/compartible y guión del video de 3 minutos en inglés sobre la Demo en vivo.
 
 ---
 

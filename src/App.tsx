@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navbar } from './components/Navbar';
+import { Navbar, SHOW_STUDIO } from './components/Navbar';
 import { ProjectSelector } from './components/ProjectSelector';
 import { ChatMentor } from './components/ChatMentor';
 import { ImageAnalyzer } from './components/ImageAnalyzer';
@@ -8,6 +8,7 @@ import { JudgingCriteria } from './components/JudgingCriteria';
 import { PosTerminal } from './components/PosTerminal';
 import { ClientPay } from './components/ClientPay';
 import { LiveDemo } from './components/LiveDemo';
+import { Account } from './components/Account';
 import { BUILT_IN_SKILLS, SkillItem, ProjectIdea } from './data/hackathonData';
 
 export default function App() {
@@ -38,7 +39,6 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        activeSkill={activeSkill}
       />
 
       {/* Main Viewport Content */}
@@ -49,14 +49,16 @@ export default function App() {
 
         {activeTab === 'client-pay' && <ClientPay />}
 
-        {activeTab === 'projects' && (
+        {activeTab === 'account' && <Account />}
+
+        {SHOW_STUDIO && activeTab === 'projects' && (
           <ProjectSelector
             onSelectProjectForChat={handleSelectProjectForChat}
             onNavigateToAnalyzer={() => setActiveTab('analyzer')}
           />
         )}
 
-        {activeTab === 'chat' && (
+        {SHOW_STUDIO && activeTab === 'chat' && (
           <ChatMentor
             activeSkill={activeSkill}
             initialProjectContext={initialProjectForChat}
@@ -64,9 +66,9 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'analyzer' && <ImageAnalyzer />}
+        {SHOW_STUDIO && activeTab === 'analyzer' && <ImageAnalyzer />}
 
-        {activeTab === 'skills' && (
+        {SHOW_STUDIO && activeTab === 'skills' && (
           <SkillLoader
             skills={skills}
             activeSkill={activeSkill}
@@ -76,18 +78,14 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'criteria' && <JudgingCriteria />}
+        {SHOW_STUDIO && activeTab === 'criteria' && <JudgingCriteria />}
       </main>
 
       {/* Quiet Footer */}
       <footer className="border-t border-slate-800/60 bg-slate-950/60 px-6 py-4 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Colosseum Studio · Superteam Argentina Hackathon</span>
-          <div className="flex items-center gap-3">
-            <span>Para Máximo Robles (Diseño Multimedial & Full Stack)</span>
-            <span aria-hidden="true">·</span>
-            <span>Solana Ecosystem</span>
-          </div>
+          <span>MatePay · Pagos en USDC con Solana Pay · Solo devnet: la plata es de prueba</span>
+          <span>Montero · Gerez · Robles — Colosseum x Superteam Argentina</span>
         </div>
       </footer>
     </div>

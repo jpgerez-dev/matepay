@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Wallets devnet generadas por el server y datos locales de MatePay
+.keys/
+data/
+dist-server/

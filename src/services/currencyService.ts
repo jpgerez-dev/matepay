@@ -14,7 +14,7 @@ const DEFAULT_RATE: ExchangeRate = {
   casa: 'cripto',
   nombre: 'Dólar Cripto (USDC/USDT)',
   fechaActualizacion: new Date().toISOString(),
-  fuente: 'Fallback Offline',
+  fuente: 'Cotización de respaldo (sin conexión a DolarAPI)',
 };
 
 let cachedRate: ExchangeRate | null = null;

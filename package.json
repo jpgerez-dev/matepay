@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --define:process.env.NODE_ENV=\\\"production\\\" --outfile=dist-server/server.js",
     "preview": "vite preview",
     "start": "node dist-server/server.js",
     "clean": "rm -rf dist server.js dist-server",
@@ -14,16 +14,23 @@
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@solana/spl-token": "^0.4.15",
+    "@solana/wallet-adapter-base": "^0.9.28",
+    "@solana/wallet-adapter-react": "^0.15.40",
+    "@solana/wallet-adapter-react-ui": "^0.9.40",
     "@solana/web3.js": "^1.99.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "bs58": "^6.0.0",
+    "buffer": "^6.0.3",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "tweetnacl": "^1.0.3",
     "vite": "^8.3.0"
   },
   "devDependencies": {
@@ -33,7 +40,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

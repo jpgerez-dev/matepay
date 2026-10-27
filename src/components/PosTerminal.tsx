@@ -9,28 +9,56 @@ import {
   Store,
   Delete,
   X,
-  Clock,
   ExternalLink,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import {
   getLiveCriptoRate,
   convertArsToUsdc,
-  convertUsdcToArs,
-  formatARS,
-  formatUSDC,
   ExchangeRate,
 } from '../services/currencyService';
+import type { PaymentRequestDto } from '../../shared/matepay';
+import { api, explorerTxUrl, shortAddress } from '../lib/api';
+import { playPaymentChime } from '../lib/chime';
+import { useWalletAccount } from '../hooks/useMatePay';
 import { SolanaPayQr } from './SolanaPayQr';
 
-interface PosTerminalProps {
-  merchantAlias?: string;
-  merchantPublicKey?: string;
+interface Merchant {
+  address: string;
+  label: string;
+  alias?: string;
 }
 
+interface PosTerminalProps {
+  // Si viene fijo (demo), cobra a ese comercio; si no, a la wallet conectada.
+  merchant?: Merchant;
+  initialAmountArs?: string;
+  soundEnabled?: boolean;
+  onRequestCreated?: (pr: PaymentRequestDto | null) => void;
+}
+
+const POLL_INTERVAL_MS = 2000;
+
 export const PosTerminal: React.FC<PosTerminalProps> = ({
-  merchantAlias = '@cafemartinez',
-  merchantPublicKey = '7xKXtg2CW87d97TXJSD8j9P4mZ7a8B3cDevnetDemo1',
+  merchant: fixedMerchant,
+  initialAmountArs = '0',
+  soundEnabled = true,
+  onRequestCreated,
 }) => {
+  const account = useWalletAccount();
+  const merchant: Merchant | null =
+    fixedMerchant ??
+    (account.address
+      ? {
+          address: account.address,
+          label: account.alias?.label ?? shortAddress(account.address),
+          alias: account.alias?.alias,
+        }
+      : null);
+
   // Estados de la cotización
   const [rate, setRate] = useState<ExchangeRate>({
     compra: 1210,
@@ -44,16 +72,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
   // Estados del flujo del cobro: 'input' | 'qr' | 'success'
   const [step, setStep] = useState<'input' | 'qr' | 'success'>('input');
-  const [rawAmountArs, setRawAmountArs] = useState<string>('0');
-  const [description, setDescription] = useState<string>('Café y tostadas');
+  const [rawAmountArs, setRawAmountArs] = useState<string>(initialAmountArs);
+  const [description, setDescription] = useState<string>('');
 
-  // Transacción confirmada
-  const [lastPayment, setLastPayment] = useState<{
-    amountUsdc: number;
-    amountArs: number;
-    timestamp: string;
-    signature: string;
-  } | null>(null);
+  // Cobro activo (creado en el server, con reference única on-chain)
+  const [paymentRequest, setPaymentRequest] = useState<PaymentRequestDto | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Cargar cotización en vivo al montar
   const updateRates = async () => {
@@ -106,18 +131,65 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     setRawAmountArs(String(current + addVal));
   };
 
-  const handleSimulatePayment = () => {
-    setLastPayment({
-      amountUsdc: numAmountUsdc,
-      amountArs: numAmountArs,
-      timestamp: new Date().toLocaleTimeString('es-AR'),
-      signature: '5Knp...' + Math.random().toString(36).substring(2, 10) + '...devnet',
-    });
-    setStep('success');
+  const createPaymentRequest = async () => {
+    if (!merchant) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const pr = await api.createPaymentRequest({
+        recipient: merchant.address,
+        recipientLabel: merchant.label,
+        amountUsdc: numAmountUsdc,
+        amountArs: numAmountArs,
+        rateArs: rate.venta,
+        message: description,
+      });
+      setPaymentRequest(pr);
+      onRequestCreated?.(pr);
+      setStep('qr');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo crear el cobro.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Mientras el QR está en pantalla, consultamos la cadena hasta ver el pago.
+  useEffect(() => {
+    if (step !== 'qr' || !paymentRequest) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const latest = await api.paymentRequest(paymentRequest.id);
+        if (cancelled) return;
+        setPaymentRequest(latest);
+        if (latest.status === 'confirmed') {
+          setStep('success');
+          onRequestCreated?.(null);
+          if (soundEnabled) playPaymentChime();
+          account.refresh();
+        }
+      } catch {
+        // Reintenta en el próximo ciclo
+      }
+    };
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [step, paymentRequest?.id, soundEnabled]);
+
+  const cancelRequest = () => {
+    setPaymentRequest(null);
+    onRequestCreated?.(null);
+    setStep('input');
   };
 
   const resetAll = () => {
     setRawAmountArs('0');
+    setDescription('');
+    setPaymentRequest(null);
     setStep('input');
   };
 
@@ -139,7 +211,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400 font-mono">
-              Comercio: <span className="text-purple-300 font-semibold">{merchantAlias}</span>
+              Cobra:{' '}
+              <span className="text-purple-300 font-semibold">
+                {merchant ? merchant.alias ?? merchant.label : 'conectá tu wallet'}
+              </span>
             </p>
           </div>
         </div>
@@ -149,7 +224,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           <div className="space-y-0.5">
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Dólar Cripto:</span>
+              <span>{rate.nombre}:</span>
             </div>
             <p className="font-mono text-xs font-bold text-white tabular-nums">
               ${rate.venta.toLocaleString('es-AR')} ARS
@@ -253,14 +328,33 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           </div>
 
           {/* Botón Principal Generar Cobro */}
-          <button
-            onClick={() => setStep('qr')}
-            disabled={numAmountArs <= 0}
-            className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white font-['Syne'] font-bold text-base rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
-          >
-            <span>Generar Cobro QR de {numAmountUsdc.toFixed(2)} USDC</span>
-            <ArrowRight className="w-5 h-5" />
-          </button>
+          {error && (
+            <p className="flex items-center gap-1.5 text-xs text-rose-300">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+            </p>
+          )}
+
+          {merchant ? (
+            <button
+              onClick={createPaymentRequest}
+              disabled={numAmountUsdc <= 0 || creating}
+              className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white font-['Syne'] font-bold text-base rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+            >
+              {creating ? (
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  <span>Generar cobro QR de {numAmountUsdc.toFixed(2)} USDC</span>
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
+          ) : (
+            <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-col items-center gap-3 text-center">
+              <p className="text-xs text-slate-300">Conectá la wallet donde querés recibir los USDC.</p>
+              <WalletMultiButton />
+            </div>
+          )}
         </div>
       )}
 
@@ -277,7 +371,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
               </h3>
             </div>
             <button
-              onClick={() => setStep('input')}
+              onClick={cancelRequest}
               className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               title="Volver a modificar monto"
             >
@@ -286,24 +380,31 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           </div>
 
           {/* Render del código QR */}
-          <SolanaPayQr
-            recipient={merchantPublicKey}
-            amountUsdc={numAmountUsdc}
-            amountArs={numAmountArs}
-            label={merchantAlias}
-            message={description}
-            onPaymentSimulated={handleSimulatePayment}
-          />
+          {paymentRequest && (
+            <SolanaPayQr
+              url={paymentRequest.solanaPayUrl}
+              amountUsdc={paymentRequest.amountUsdc}
+              amountArs={paymentRequest.amountArs}
+              recipientLabel={paymentRequest.recipientLabel}
+              mode={paymentRequest.mode}
+            />
+          )}
 
           {/* Indicador de Espera */}
-          <div className="p-3 bg-purple-950/30 border border-purple-900/50 rounded-xl flex items-center justify-center gap-2 text-xs text-purple-300">
-            <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
-            <span>Esperando confirmación en Solana Devnet...</span>
-          </div>
+          {paymentRequest?.status === 'expired' ? (
+            <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-center text-xs text-amber-300">
+              Este cobro venció sin pagos. Generá uno nuevo.
+            </div>
+          ) : (
+            <div className="p-3 bg-purple-950/30 border border-purple-900/50 rounded-xl flex items-center justify-center gap-2 text-xs text-purple-300">
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
+              <span>Esperando el pago en Solana devnet...</span>
+            </div>
+          )}
 
           <div className="text-center">
             <button
-              onClick={() => setStep('input')}
+              onClick={cancelRequest}
               className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
             >
               ← Cancelar o cambiar monto
@@ -313,7 +414,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       )}
 
       {/* VISTA 3: PANTALLA DE PAGO CONFIRMADO */}
-      {step === 'success' && lastPayment && (
+      {step === 'success' && paymentRequest && (
         <div className="bg-gradient-to-b from-emerald-950/40 via-slate-900/90 to-slate-950 border border-emerald-800/80 rounded-2xl p-8 text-center space-y-6 shadow-2xl animate-in zoom-in-95 duration-200">
           {/* Checkmark animado grande */}
           <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-lg shadow-emerald-500/20">
@@ -322,13 +423,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
 
           <div className="space-y-1">
             <span className="text-xs font-mono text-emerald-400 uppercase tracking-wider">
-              ¡Transacción Confirmada en Devnet!
+              ¡Cobro confirmado en devnet!
             </span>
             <h3 className="font-['Syne'] text-3xl font-extrabold text-white">
-              +{lastPayment.amountUsdc.toFixed(2)} USDC
+              +{paymentRequest.amountUsdc.toFixed(2)} USDC
             </h3>
             <p className="text-xs text-slate-400 font-mono">
-              Equivalente a ${lastPayment.amountArs.toLocaleString('es-AR')} ARS
+              Equivalente a ${paymentRequest.amountArs.toLocaleString('es-AR')} ARS
             </p>
           </div>
 
@@ -336,20 +437,38 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
           <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl text-left space-y-2 text-xs font-mono text-slate-300">
             <div className="flex justify-between">
               <span className="text-slate-500">Hora:</span>
-              <span className="text-white">{lastPayment.timestamp}</span>
+              <span className="text-white">
+                {new Date(paymentRequest.confirmedAt ?? Date.now()).toLocaleTimeString('es-AR')}
+              </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Destino:</span>
-              <span className="text-purple-300">{merchantAlias}</span>
+              <span className="text-slate-500">Cobró:</span>
+              <span className="text-purple-300">{paymentRequest.recipientLabel}</span>
             </div>
+            {paymentRequest.payer && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">Pagó:</span>
+                <span className="text-white">{shortAddress(paymentRequest.payer)}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-slate-500">Concepto:</span>
-              <span className="text-white">{description || 'Cobro POS'}</span>
+              <span className="text-white">{paymentRequest.message || 'Cobro POS'}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Firma:</span>
-              <span className="text-slate-400 truncate max-w-[180px]">{lastPayment.signature}</span>
-            </div>
+            {paymentRequest.signature && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">Firma:</span>
+                <a
+                  href={explorerTxUrl(paymentRequest.signature)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-purple-300 hover:text-purple-200"
+                >
+                  {shortAddress(paymentRequest.signature)}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
           </div>
 
           {/* Botón Nuevo Cobro */}

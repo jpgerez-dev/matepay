@@ -1,15 +1,26 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
-import dotenv from 'dotenv';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
-
-dotenv.config();
+import { registerMatePayRoutes } from './server/matepay/routes';
+import { errorHandler } from './server/matepay/http';
+import { assertDevnet, ensureFeePayerFunded, feePayer } from './server/matepay/solana';
 
 const PORT = Number(process.env.PORT) || 3000;
 
 async function bootstrap() {
+  try {
+    await assertDevnet();
+    ensureFeePayerFunded().catch(() => {});
+  } catch (err: any) {
+    // Si el RPC apunta a otra red no arrancamos; si solo no responde, seguimos y avisamos.
+    if (/no es devnet/.test(err?.message)) throw err;
+    console.warn('[matepay] No se pudo contactar al RPC de devnet al arrancar:', err?.message);
+  }
+
   const app = express();
+  app.set('trust proxy', true);
   app.use(express.json({ limit: '30mb' }));
   app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
@@ -330,87 +341,9 @@ Responde en español estructurado con encabezados claros y viñetas ejecutables.
     }
   });
 
-  // === MatePay Backend Endpoints (Mauricio's Module) ===
-
-  // Registro de Alias en Memoria para Devnet
-  const aliasRegistry: Record<string, { address: string; label: string; createdAt: string }> = {
-    '@cafemartinez': {
-      address: '7xKXtg2CW87d97TXJSD8j9P4mZ7a8B3cDevnetDemo1',
-      label: 'Café Martinez San Martín',
-      createdAt: new Date().toISOString(),
-    },
-    '@montero': {
-      address: '4uQeVj5tqViQh7yVWzmKb7P3n9A8B6cDevnetMauricio',
-      label: 'Mauricio Montero (Full Stack Lead)',
-      createdAt: new Date().toISOString(),
-    },
-    '@juanpi': {
-      address: '3mK9tg5VW87d97TXJSD8j9P4mZ7a8B3cDevnetJuanPablo',
-      label: 'Juan Pablo Gerez (Frontend Lead)',
-      createdAt: new Date().toISOString(),
-    },
-    '@roblesmaximo': {
-      address: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-      label: 'Máximo Robles (Diseño Multimedial)',
-      createdAt: new Date().toISOString(),
-    },
-    '@superteamarg': {
-      address: 'SuperteamArgDevnetPublicAddress11111111111111',
-      label: 'Superteam Argentina Hackathon Treasury',
-      createdAt: new Date().toISOString(),
-    },
-  };
-
-  // Obtener todos los alias registrados
-  app.get('/api/matepay/aliases', (_req: Request, res: Response) => {
-    res.json(aliasRegistry);
-  });
-
-  // Resolver alias individual
-  app.get('/api/matepay/alias/:alias', (req: Request, res: Response) => {
-    const rawAlias = req.params.alias.toLowerCase();
-    const cleanAlias = rawAlias.startsWith('@') ? rawAlias : `@${rawAlias}`;
-    const found = aliasRegistry[cleanAlias];
-    if (found) {
-      res.json({ alias: cleanAlias, ...found });
-    } else {
-      res.status(404).json({ error: `Alias ${cleanAlias} no encontrado.` });
-    }
-  });
-
-  // Registrar nuevo alias
-  app.post('/api/matepay/alias', (req: Request, res: Response) => {
-    const { alias, address, label } = req.body;
-    if (!alias || !address) {
-      return res.status(400).json({ error: 'Alias y dirección de Solana son obligatorios.' });
-    }
-    const cleanAlias = alias.trim().toLowerCase().startsWith('@')
-      ? alias.trim().toLowerCase()
-      : `@${alias.trim().toLowerCase()}`;
-
-    aliasRegistry[cleanAlias] = {
-      address: address.trim(),
-      label: label?.trim() || cleanAlias,
-      createdAt: new Date().toISOString(),
-    };
-    res.json({ success: true, alias: cleanAlias, record: aliasRegistry[cleanAlias] });
-  });
-
-  // Servicio Fee-Payer Gasless (Devnet)
-  app.post('/api/matepay/fee-payer/sign', async (req: Request, res: Response) => {
-    try {
-      res.json({
-        success: true,
-        network: 'Solana Devnet',
-        feePaid: '0.000005 SOL',
-        feePayerAddress: 'MatePayFeePayerDevnetKey11111111111111111111',
-        message: 'Transacción subsidiada por MatePay Fee-Payer. Usuario paga $0 en SOL.',
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Error en Fee-Payer service' });
-    }
-  });
+  // === MatePay: pagos USDC gasless en Solana devnet ===
+  registerMatePayRoutes(app);
+  app.use('/api', errorHandler);
 
   // Vite middleware in dev or static files in prod
   if (process.env.NODE_ENV === 'production') {
@@ -427,7 +360,8 @@ Responde en español estructurado con encabezados claros y viñetas ejecutables.
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Colosseum Studio Server listening on port ${PORT}`);
+    console.log(`MatePay escuchando en http://localhost:${PORT}`);
+    console.log(`[matepay] Fee-payer devnet: ${feePayer.publicKey.toBase58()}`);
   });
 }
 
